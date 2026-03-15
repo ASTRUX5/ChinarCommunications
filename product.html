@@ -94,14 +94,80 @@ button{cursor:pointer;font-family:var(--f-body)}
 /* GALLERY */
 .gallery{position:static}
 @media(min-width:768px){.gallery{position:sticky;top:80px}}
-.main-img-wrap{aspect-ratio:1;border-radius:16px;overflow:hidden;background:var(--dark);border:1px solid var(--line);margin-bottom:10px}
-.main-img-wrap img{width:100%;height:100%;object-fit:cover;transition:transform 0.5s cubic-bezier(0.4,0,0.2,1)}
-.main-img-wrap:hover img{transform:scale(1.04)}
-.thumbs-row{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+
+/* Main image box — 2:3 portrait ratio, image contained with padding */
+.main-img-wrap{
+  aspect-ratio:2/3;
+  border-radius:16px;
+  overflow:hidden;
+  background:var(--dark);
+  border:1px solid var(--line);
+  margin-bottom:10px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:zoom-in;
+  position:relative;
+}
+.main-img-wrap img{
+  max-width:92%;
+  max-height:92%;
+  width:auto;
+  height:auto;
+  object-fit:contain;
+  transition:transform 0.5s cubic-bezier(0.4,0,0.2,1);
+  display:block;
+}
+.main-img-wrap:hover img{transform:scale(1.03)}
+.img-progress-wrap{height:3px;background:var(--line);border-radius:50px;overflow:hidden;margin-bottom:10px;display:none}
+.img-progress-wrap.on{display:block}
+.img-progress-bar{height:100%;background:var(--gold);border-radius:50px;width:0%;transition:width 0.1s linear}
+
+/* Thumbs — scroll once then stop */
+.thumbs-row{
+  display:flex;gap:8px;
+  overflow-x:auto;
+  padding-bottom:4px;
+  scroll-behavior:smooth;
+}
 .thumbs-row::-webkit-scrollbar{height:0}
-.thumb{width:64px;height:64px;flex-shrink:0;border-radius:8px;overflow:hidden;border:2px solid var(--line);cursor:pointer;transition:border-color 0.2s}
+.thumb{width:64px;height:80px;flex-shrink:0;border-radius:8px;overflow:hidden;border:2px solid var(--line);cursor:pointer;transition:border-color 0.2s;background:var(--dark);display:flex;align-items:center;justify-content:center}
 .thumb:hover,.thumb.active{border-color:var(--gold)}
-.thumb img{width:100%;height:100%;object-fit:cover}
+.thumb img{max-width:90%;max-height:90%;width:auto;height:auto;object-fit:contain}
+
+/* LIGHTBOX */
+.lightbox{
+  position:fixed;inset:0;z-index:9800;
+  background:rgba(0,0,0,0.96);
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;
+  transition:opacity 0.3s;
+  padding:16px;
+}
+.lightbox.open{opacity:1;pointer-events:all}
+.lightbox img{
+  max-width:100%;max-height:90vh;
+  width:auto;height:auto;
+  object-fit:contain;
+  border-radius:8px;
+  transform:scale(0.92);
+  transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);
+}
+.lightbox.open img{transform:scale(1)}
+.lightbox-close{
+  position:absolute;top:16px;right:16px;
+  width:40px;height:40px;
+  background:var(--dark);border:1px solid var(--line);
+  border-radius:10px;color:var(--muted);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:all 0.2s;font-size:18px;
+}
+.lightbox-close:hover{color:var(--white);border-color:var(--line-hi)}
+.lightbox-hint{
+  position:absolute;bottom:20px;left:50%;transform:translateX(-50%);
+  font-size:11px;letter-spacing:2px;text-transform:uppercase;
+  color:var(--muted);pointer-events:none;
+}
 
 /* PRODUCT INFO */
 .prod-brand-tag{display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(212,175,55,0.25);background:var(--gold-dim);padding:5px 12px;border-radius:50px;margin-bottom:12px}
@@ -248,6 +314,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!p) { try { p = await fetchProductById(pid); } catch(e) {} }
   if (!p) { showNF(); return; }
   curP = p; renderProduct(p); loadRelated(p);
+  // Init slideshow after DOM is updated
+  setTimeout(() => initGallery(p.images?.length ? p.images : ['https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=800&q=80']), 100);
 });
 
 function renderProduct(p) {
@@ -279,10 +347,14 @@ function renderProduct(p) {
       <div class="product-layout">
         <!-- GALLERY -->
         <div class="gallery">
-          <div class="main-img-wrap">
+          <div class="main-img-wrap" id="mainImgWrap" onclick="openLightbox()" title="Tap to enlarge">
             <img id="mainImg" src="${imgs[0]}" alt="${p.name}" onerror="this.src='https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=800&q=80'">
           </div>
-          ${imgs.length > 1 ? `<div class="thumbs-row">${thumbsHTML}</div>` : ''}
+          ${imgs.length > 1 ? `
+          <div class="img-progress-wrap${imgs.length > 1 ? ' on' : ''}" id="imgProgressWrap">
+            <div class="img-progress-bar" id="imgProgressBar"></div>
+          </div>
+          <div class="thumbs-row">${thumbsHTML}</div>` : ''}
         </div>
 
         <!-- INFO -->
@@ -323,11 +395,106 @@ function renderProduct(p) {
     </div>`;
 }
 
-function setImg(src, thumb) {
-  document.getElementById('mainImg').src = src;
-  document.querySelectorAll('.thumb').forEach(t => t.classList.remove('active'));
-  thumb.classList.add('active');
+// ── GALLERY STATE ──
+let galleryImgs = [];
+let galleryIdx = 0;
+let slideTimer = null;
+let progressTimer = null;
+let progressStart = null;
+const SLIDE_DURATION = 3500; // ms per image
+
+function initGallery(imgs) {
+  galleryImgs = imgs;
+  galleryIdx = 0;
+  if (imgs.length > 1) startSlideshow();
 }
+
+function setImgByIndex(idx, fromUser) {
+  if (!galleryImgs.length) return;
+  galleryIdx = idx;
+  const src = galleryImgs[idx];
+  const img = document.getElementById('mainImg');
+  img.style.opacity = '0';
+  img.style.transform = 'scale(0.97)';
+  setTimeout(() => {
+    img.src = src;
+    img.style.opacity = '1';
+    img.style.transform = 'scale(1)';
+  }, 160);
+  // Highlight active thumb
+  const thumbs = document.querySelectorAll('.thumb');
+  thumbs.forEach((t, i) => {
+    t.classList.toggle('active', i === idx);
+    if (i === idx) t.scrollIntoView({ behavior:'smooth', block:'nearest', inline:'center' });
+  });
+  // Reset progress bar
+  resetProgress();
+  // If user tapped thumb, restart slideshow from this index
+  if (fromUser && galleryImgs.length > 1) startSlideshow();
+}
+
+function setImg(src, thumb) {
+  const idx = galleryImgs.indexOf(src);
+  stopSlideshow();
+  setImgByIndex(idx >= 0 ? idx : 0, true);
+}
+
+function startSlideshow() {
+  stopSlideshow();
+  if (galleryImgs.length <= 1) return;
+  animateProgress();
+  slideTimer = setTimeout(function advance() {
+    if (galleryIdx < galleryImgs.length - 1) {
+      galleryIdx++;
+      setImgByIndex(galleryIdx, false);
+      // Continue to next slide
+      slideTimer = setTimeout(advance, SLIDE_DURATION);
+    }
+    // Stop at last image — no loop
+  }, SLIDE_DURATION);
+}
+
+function stopSlideshow() {
+  clearTimeout(slideTimer);
+  clearInterval(progressTimer);
+  slideTimer = null;
+  progressTimer = null;
+  progressStart = null;
+}
+
+function resetProgress() {
+  clearInterval(progressTimer);
+  const bar = document.getElementById('imgProgressBar');
+  if (bar) { bar.style.transition = 'none'; bar.style.width = '0%'; }
+}
+
+function animateProgress() {
+  const bar = document.getElementById('imgProgressBar');
+  if (!bar) return;
+  bar.style.transition = 'none';
+  bar.style.width = '0%';
+  // Force reflow
+  bar.offsetHeight;
+  bar.style.transition = `width ${SLIDE_DURATION}ms linear`;
+  bar.style.width = '100%';
+}
+
+function openLightbox() {
+  const src = document.getElementById('mainImg').src;
+  document.getElementById('lightboxImg').src = src;
+  document.getElementById('lightbox').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  stopSlideshow();
+}
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+  document.body.style.overflow = '';
+  // Resume slideshow if not at last image
+  if (galleryImgs.length > 1 && galleryIdx < galleryImgs.length - 1) {
+    startSlideshow();
+  }
+}
+document.addEventListener('keydown', e => { if(e.key === 'Escape') closeLightbox(); });
 
 async function loadRelated(p) {
   let prods = getProducts();
@@ -383,5 +550,14 @@ function placeOrder(){
 }
 function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className=`toast show${type?' '+type:''}`;setTimeout(()=>t.classList.remove('show'),3000);}
 </script>
+
+<!-- LIGHTBOX -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <button class="lightbox-close" onclick="closeLightbox()">
+    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+  </button>
+  <img id="lightboxImg" src="" alt="Product Image">
+  <p class="lightbox-hint" style="color:rgba(255,255,255,0.3);font-size:11px;letter-spacing:2px;text-transform:uppercase;margin-top:4px">Tap anywhere to close</p>
+</div>
 </body>
 </html>
