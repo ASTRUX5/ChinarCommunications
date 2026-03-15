@@ -336,7 +336,8 @@ tr:hover td{background:rgba(201,168,76,.02)}
 <script src="app.js"></script>
 <script>
 // AUTH
-const LPASS = 'chinar2025'; // local fallback password — change this
+const LPASS = 'Chinar@2025';
+const LTOKEN = 'chinar-secret-abc123';
 let isAuth = sessionStorage.getItem('cv_admin') === '1';
 if (isAuth) showApp();
 
@@ -344,6 +345,7 @@ function doLogin() {
   const pw = document.getElementById('pw').value;
   if (pw === LPASS) {
     sessionStorage.setItem('cv_admin', '1');
+    sessionStorage.setItem('cv_admin_token', LTOKEN);
     document.getElementById('lerr').style.display = 'none';
     showApp();
   } else {
@@ -351,7 +353,7 @@ function doLogin() {
     document.getElementById('pw').value = '';
   }
 }
-function doLogout() { sessionStorage.removeItem('cv_admin'); location.reload(); }
+function doLogout() { sessionStorage.removeItem('cv_admin'); sessionStorage.removeItem('cv_admin_token'); location.reload(); }
 function showApp() {
   document.getElementById('login').style.display = 'none';
   document.getElementById('app').style.display = 'block';
@@ -571,4 +573,3 @@ uz.addEventListener('drop',e=>{e.preventDefault();uz.classList.remove('drag');ha
 </script>
 </body>
 </html>
-
